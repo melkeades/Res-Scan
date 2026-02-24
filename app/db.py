@@ -1,20 +1,27 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+import sqlite3
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
-import duckdb
 
-
-def connect(db_path: Path) -> duckdb.DuckDBPyConnection:
+@contextmanager
+def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = duckdb.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     init_schema(conn)
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
-def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
+def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS assets (
@@ -28,9 +35,9 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
             resource_type TEXT,
             status_code INTEGER,
             content_type TEXT,
-            content_length BIGINT,
+            content_length INTEGER,
             scan_id TEXT NOT NULL,
-            discovered_at TIMESTAMP NOT NULL
+            discovered_at TEXT NOT NULL
         )
         """
     )
@@ -39,21 +46,22 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         CREATE TABLE IF NOT EXISTS scan_meta (
             site_url TEXT PRIMARY KEY,
             last_scan_id TEXT NOT NULL,
-            last_scanned_at TIMESTAMP NOT NULL,
+            last_scanned_at TEXT NOT NULL,
             last_status TEXT NOT NULL
         )
         """
     )
+    conn.commit()
 
 
 def replace_site_assets(
-    conn: duckdb.DuckDBPyConnection,
+    conn: sqlite3.Connection,
     *,
     site_url: str,
     scan_id: str,
     rows: Sequence[dict],
 ) -> None:
-    conn.execute("BEGIN TRANSACTION")
+    conn.execute("BEGIN")
     try:
         conn.execute("DELETE FROM assets WHERE site_url = ?", [site_url])
         if rows:
@@ -99,7 +107,7 @@ def replace_site_assets(
         conn.execute(
             """
             INSERT INTO scan_meta (site_url, last_scan_id, last_scanned_at, last_status)
-            VALUES (?, ?, NOW(), 'done')
+            VALUES (?, ?, CURRENT_TIMESTAMP, 'done')
             ON CONFLICT(site_url) DO UPDATE
             SET last_scan_id = excluded.last_scan_id,
                 last_scanned_at = excluded.last_scanned_at,
@@ -108,14 +116,14 @@ def replace_site_assets(
             [site_url, scan_id],
         )
     except Exception:
-        conn.execute("ROLLBACK")
+        conn.rollback()
         raise
     else:
-        conn.execute("COMMIT")
+        conn.commit()
 
 
 def preview_assets(
-    conn: duckdb.DuckDBPyConnection, *, site_url: str, limit: int, offset: int
+    conn: sqlite3.Connection, *, site_url: str, limit: int, offset: int
 ) -> tuple[list[dict], int]:
     rows = conn.execute(
         """
@@ -143,25 +151,10 @@ def preview_assets(
     total = conn.execute(
         "SELECT COUNT(*) FROM assets WHERE site_url = ?", [site_url]
     ).fetchone()[0]
-    columns = [
-        "site_url",
-        "page_url",
-        "asset_url",
-        "dom_path",
-        "asset_attr",
-        "attr_occurrence",
-        "instance_key",
-        "resource_type",
-        "status_code",
-        "content_type",
-        "content_length",
-        "scan_id",
-        "discovered_at",
-    ]
-    return [dict(zip(columns, row, strict=False)) for row in rows], int(total)
+    return [dict(row) for row in rows], int(total)
 
 
-def summary_for_site(conn: duckdb.DuckDBPyConnection, *, site_url: str) -> dict:
+def summary_for_site(conn: sqlite3.Connection, *, site_url: str) -> dict:
     by_type_rows = conn.execute(
         """
         SELECT
@@ -204,7 +197,7 @@ def summary_for_site(conn: duckdb.DuckDBPyConnection, *, site_url: str) -> dict:
     }
 
 
-def list_scanned_sites(conn: duckdb.DuckDBPyConnection) -> list[dict]:
+def list_scanned_sites(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         """
         SELECT
@@ -217,21 +210,21 @@ def list_scanned_sites(conn: duckdb.DuckDBPyConnection) -> list[dict]:
         """
     ).fetchall()
     response = []
-    for site_url, resource_rows, scanned_at in rows:
+    for row in rows:
+        site_url = row["site_url"]
         parsed = urlsplit(site_url)
-        site_name = parsed.netloc or site_url
         response.append(
             {
                 "site_url": site_url,
-                "site_name": site_name,
-                "resource_rows": int(resource_rows),
-                "scanned_at": scanned_at,
+                "site_name": parsed.netloc or site_url,
+                "resource_rows": int(row["resource_rows"]),
+                "scanned_at": row["scanned_at"],
             }
         )
     return response
 
 
-def assets_for_site(conn: duckdb.DuckDBPyConnection, *, site_url: str) -> tuple[list[dict], int]:
+def assets_for_site(conn: sqlite3.Connection, *, site_url: str) -> tuple[list[dict], int]:
     rows = conn.execute(
         """
         SELECT
@@ -255,25 +248,11 @@ def assets_for_site(conn: duckdb.DuckDBPyConnection, *, site_url: str) -> tuple[
     total = conn.execute(
         "SELECT COUNT(*) FROM assets WHERE site_url = ?", [site_url]
     ).fetchone()[0]
-    columns = [
-        "page_url",
-        "asset_url",
-        "dom_path",
-        "asset_attr",
-        "attr_occurrence",
-        "instance_key",
-        "resource_type",
-        "status_code",
-        "content_type",
-        "content_length",
-        "scan_id",
-        "discovered_at",
-    ]
-    return [dict(zip(columns, row, strict=False)) for row in rows], int(total)
+    return [dict(row) for row in rows], int(total)
 
 
-def delete_site_data(conn: duckdb.DuckDBPyConnection, *, site_url: str) -> dict:
-    conn.execute("BEGIN TRANSACTION")
+def delete_site_data(conn: sqlite3.Connection, *, site_url: str) -> dict:
+    conn.execute("BEGIN")
     try:
         removed_assets = conn.execute(
             "SELECT COUNT(*) FROM assets WHERE site_url = ?", [site_url]
@@ -284,12 +263,13 @@ def delete_site_data(conn: duckdb.DuckDBPyConnection, *, site_url: str) -> dict:
         conn.execute("DELETE FROM assets WHERE site_url = ?", [site_url])
         conn.execute("DELETE FROM scan_meta WHERE site_url = ?", [site_url])
     except Exception:
-        conn.execute("ROLLBACK")
+        conn.rollback()
         raise
     else:
-        conn.execute("COMMIT")
+        conn.commit()
     return {
         "site_url": site_url,
         "removed_assets": int(removed_assets),
         "removed_meta": bool(removed_meta_rows),
     }
+

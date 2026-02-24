@@ -9,7 +9,7 @@ from app.main import app, settings
 
 
 def test_delete_site_api_removes_site(tmp_path) -> None:
-    db_path = tmp_path / "assets.duckdb"
+    db_path = tmp_path / "assets.sqlite"
     old_db_path = settings.db_path
     settings.db_path = db_path
     try:
@@ -51,4 +51,3 @@ def test_delete_site_api_removes_site(tmp_path) -> None:
         assert sites_res.json()["rows"] == []
     finally:
         settings.db_path = old_db_path
-

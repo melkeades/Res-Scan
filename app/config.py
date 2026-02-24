@@ -20,7 +20,7 @@ RESOURCE_TYPES: tuple[ResourceType, ...] = (
 class AppSettings(BaseModel):
     output_dir: Path = Path("out")
     data_dir: Path = Path("data")
-    db_path: Path = Path("out/assets.duckdb")
+    db_path: Path = Path("out/assets.sqlite")
     katana_path: str | None = None
     httpx_path: str | None = None
     host: str = "127.0.0.1"
@@ -30,4 +30,3 @@ class AppSettings(BaseModel):
 class SessionPreset(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     payload: dict
-

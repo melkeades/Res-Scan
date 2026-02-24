@@ -30,7 +30,7 @@ def _row(instance_key: str, page_url: str, asset_url: str, occurrence: int) -> d
 
 
 def test_replace_site_assets_removes_stale_rows(tmp_path) -> None:
-    db_path = tmp_path / "assets.duckdb"
+    db_path = tmp_path / "assets.sqlite"
     with connect(db_path) as conn:
         replace_site_assets(
             conn,
@@ -64,7 +64,7 @@ def test_replace_site_assets_removes_stale_rows(tmp_path) -> None:
 
 
 def test_site_list_and_site_assets_views(tmp_path) -> None:
-    db_path = tmp_path / "assets.duckdb"
+    db_path = tmp_path / "assets.sqlite"
     with connect(db_path) as conn:
         replace_site_assets(
             conn,
@@ -103,7 +103,7 @@ def test_site_list_and_site_assets_views(tmp_path) -> None:
 
 
 def test_delete_site_data_removes_assets_and_meta(tmp_path) -> None:
-    db_path = tmp_path / "assets.duckdb"
+    db_path = tmp_path / "assets.sqlite"
     with connect(db_path) as conn:
         replace_site_assets(
             conn,

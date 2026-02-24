@@ -165,16 +165,26 @@ def parse_attribute_urls(attr_name: str, raw_value) -> Iterable[str]:
 
 
 def normalize_identity_url(url: str) -> str | None:
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
     if parts.scheme not in {"http", "https"}:
         return None
-    host = parts.hostname.lower() if parts.hostname else ""
+    try:
+        host = parts.hostname.lower() if parts.hostname else ""
+    except ValueError:
+        return None
     if not host:
         return None
 
     netloc = host
-    if parts.port:
-        netloc = f"{netloc}:{parts.port}"
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    if port:
+        netloc = f"{netloc}:{port}"
     path = parts.path or "/"
     normalized = urlunsplit((parts.scheme.lower(), netloc, path, parts.query, ""))
 
@@ -242,4 +252,3 @@ def make_instance_key(
         ]
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
-

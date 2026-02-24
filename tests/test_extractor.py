@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.extractor import extract_asset_instances
+from app.extractor import extract_asset_instances, normalize_identity_url
 
 
 def test_records_multiple_instances_for_same_asset_on_same_page() -> None:
@@ -24,3 +24,6 @@ def test_records_multiple_instances_for_same_asset_on_same_page() -> None:
     assert scripts[1].attr_occurrence == 2
     assert scripts[0].instance_key != scripts[1].instance_key
 
+
+def test_normalize_identity_url_ignores_invalid_port_values() -> None:
+    assert normalize_identity_url("https://example.com:blank/app.js") is None

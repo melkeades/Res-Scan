@@ -130,6 +130,11 @@ code {
   font-family: "JetBrains Mono", "Consolas", monospace;
 }
 
+#timing-box {
+  margin-top: 0.65rem;
+  margin-bottom: 0;
+}
+
 .status {
   margin-top: 1rem;
   padding: 0.7rem 0.9rem;
@@ -193,6 +198,13 @@ tbody tr.active-row {
 
 .assets-view {
   margin-top: 1rem;
+}
+
+.assets-count {
+  font-size: 0.84rem;
+  color: #294968;
+  margin-top: -0.2rem;
+  margin-bottom: 0.5rem;
 }
 
 .column-toggle {

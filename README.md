@@ -1,6 +1,6 @@
 ## Res-Scan
 
-Res-Scan is a local web app for crawling a site and building an asset inventory in DuckDB.  
+Res-Scan is a local web app for crawling a site and building an asset inventory in SQLite.  
 You enter a URL, optional resource filters, and scan parameters, then the app runs Katana for crawl discovery and ProjectDiscovery `httpx` for HTTP metadata enrichment.
 
 The data model tracks asset instances by exact page position (`dom_path` + occurrence), so repeated references on the same page are preserved as separate rows.  
@@ -31,25 +31,25 @@ From project root:
 uv sync --no-config
 ```
 
-#### 3) Install DuckDB (CLI optional but recommended)
+#### 3) Install SQLite
 
-If you only use the app, the Python `duckdb` package is already installed by `uv sync`.  
+SQLite engine is built into Python, so no extra Python package is required.  
 Optional CLI install:
 
 Windows (winget):
 ```powershell
-winget install DuckDB.cli
+winget install SQLite.SQLite
 ```
 
 macOS (Homebrew):
 ```bash
-brew install duckdb
+brew install sqlite
 ```
 
 Linux (Debian/Ubuntu):
 ```bash
 sudo apt-get update
-sudo apt-get install duckdb
+sudo apt-get install sqlite3
 ```
 
 #### 4) Install Katana

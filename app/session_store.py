@@ -32,11 +32,15 @@ class JsonStore:
 def load_settings(store: JsonStore) -> AppSettings:
     raw = store.load(default={})
     try:
-        return AppSettings.model_validate(raw)
+        settings = AppSettings.model_validate(raw)
     except Exception:
-        return AppSettings()
+        settings = AppSettings()
+
+    # Migrate old DuckDB filename defaults to SQLite.
+    if settings.db_path.suffix.lower() == ".duckdb":
+        settings.db_path = settings.db_path.with_suffix(".sqlite")
+    return settings
 
 
 def save_settings(store: JsonStore, settings: AppSettings) -> None:
     store.save(settings.model_dump(mode="json"))
-

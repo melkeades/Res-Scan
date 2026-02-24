@@ -104,6 +104,17 @@
           </div>
         </div>
       </section>
+
+      <div id="delete-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
+        <div class="modal-card">
+          <h3 id="delete-modal-title">Confirm Delete</h3>
+          <p id="delete-modal-text"></p>
+          <div class="modal-actions">
+            <button id="delete-confirm-btn" class="modal-btn danger" type="button">Delete</button>
+            <button id="delete-cancel-btn" class="modal-btn cancel" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -125,6 +136,10 @@
     const selectedSiteTitle = document.getElementById("selected-site-title");
     const columnToggle = document.getElementById("column-toggle");
     const assetsTable = document.getElementById("assets-table");
+    const deleteModal = document.getElementById("delete-modal");
+    const deleteModalText = document.getElementById("delete-modal-text");
+    const deleteConfirmBtn = document.getElementById("delete-confirm-btn");
+    const deleteCancelBtn = document.getElementById("delete-cancel-btn");
 
     const ASSET_COLUMNS = [
       "page_url",
@@ -145,6 +160,7 @@
     const viewState = {
       sites: [],
       selectedSiteUrl: null,
+      pendingDeleteSiteUrl: null,
       rows: [],
       filters: {},
       visibleColumns: {},
@@ -320,7 +336,7 @@
           event.stopPropagation();
           const siteUrl = btn.getAttribute("data-delete-site-url");
           if (!siteUrl) return;
-          await deleteSite(siteUrl);
+          openDeleteModal(siteUrl);
         });
       });
     }
@@ -357,6 +373,17 @@
       containerEl.classList.remove("wide");
     }
 
+    function openDeleteModal(siteUrl) {
+      viewState.pendingDeleteSiteUrl = siteUrl;
+      deleteModalText.textContent = `Are you sure you want to delete ${siteUrl}?`;
+      deleteModal.classList.remove("hidden");
+    }
+
+    function closeDeleteModal() {
+      viewState.pendingDeleteSiteUrl = null;
+      deleteModal.classList.add("hidden");
+    }
+
     async function deleteSite(siteUrl) {
       const res = await fetch(`/api/sites?site_url=${encodeURIComponent(siteUrl)}`, {
         method: "DELETE",
@@ -371,6 +398,24 @@
       await loadSites();
       viewMessage.textContent = `Deleted: ${siteUrl}`;
     }
+
+    deleteCancelBtn.addEventListener("click", closeDeleteModal);
+    deleteModal.addEventListener("click", (event) => {
+      if (event.target === deleteModal) {
+        closeDeleteModal();
+      }
+    });
+    deleteConfirmBtn.addEventListener("click", async () => {
+      const siteUrl = viewState.pendingDeleteSiteUrl;
+      if (!siteUrl) return;
+      deleteConfirmBtn.disabled = true;
+      try {
+        await deleteSite(siteUrl);
+      } finally {
+        deleteConfirmBtn.disabled = false;
+        closeDeleteModal();
+      }
+    });
 
     function renderColumnToggles() {
       columnToggle.innerHTML = ASSET_COLUMNS.map((column) => {

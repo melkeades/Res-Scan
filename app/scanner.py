@@ -6,6 +6,7 @@ import subprocess
 from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime, timezone
+from time import perf_counter
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
@@ -27,13 +28,17 @@ class Scanner:
     def run_scan(
         self, *, scan_id: str, request: ScanRequest, progress: ProgressCallback
     ) -> dict:
+        overall_start = perf_counter()
+        stage_durations: dict[str, float] = {}
         now = datetime.now(timezone.utc)
         run_dir = self.settings.output_dir / scan_id
         run_dir.mkdir(parents=True, exist_ok=True)
 
         progress("validate", 5, "Resolving scanner binaries")
+        stage_start = perf_counter()
         katana = resolve_and_validate_tool("katana", self.settings.katana_path)
         httpx = resolve_and_validate_tool("httpx", self.settings.httpx_path)
+        stage_durations["validate"] = perf_counter() - stage_start
 
         base_site_url = normalize_site_origin(request.base_url)
         if not base_site_url:
@@ -48,11 +53,13 @@ class Scanner:
         instances_jsonl = run_dir / "instances.jsonl"
 
         progress("crawl", 15, "Running katana crawl")
+        stage_start = perf_counter()
         self._run_katana(
             tool_path=katana.path,
             request=request,
             out_file=katana_jsonl,
         )
+        stage_durations["crawl"] = perf_counter() - stage_start
 
         include_pattern = (
             re.compile(request.include_regex) if request.include_regex else None
@@ -65,6 +72,7 @@ class Scanner:
         )
 
         progress("extract", 45, "Extracting asset instances from crawled pages")
+        stage_start = perf_counter()
         instances = self._extract_instances(
             site_url=base_site_url,
             site_host=site_host,
@@ -77,6 +85,7 @@ class Scanner:
             discovered_at=now,
         )
         deduped = dedupe_instances_by_key(instances)
+        stage_durations["extract"] = perf_counter() - stage_start
 
         instances_jsonl.write_text(
             "\n".join(json.dumps(item, ensure_ascii=False) for item in deduped),
@@ -86,6 +95,7 @@ class Scanner:
         asset_urls_txt.write_text("\n".join(unique_assets), encoding="utf-8")
 
         probe_map: dict[str, dict] = {}
+        stage_start = perf_counter()
         if unique_assets:
             progress("probe", 70, "Probing assets with httpx")
             self._run_httpx(
@@ -97,6 +107,7 @@ class Scanner:
             probe_map = load_httpx_map(httpx_jsonl)
         else:
             httpx_jsonl.write_text("", encoding="utf-8")
+        stage_durations["probe"] = perf_counter() - stage_start
 
         for row in deduped:
             probe = probe_map.get(row["asset_url"], {})
@@ -105,6 +116,7 @@ class Scanner:
             row["content_length"] = probe.get("content_length")
 
         progress("db", 90, "Writing results to DuckDB")
+        stage_start = perf_counter()
         with connect(self.settings.db_path) as conn:
             replace_site_assets(
                 conn=conn,
@@ -113,12 +125,15 @@ class Scanner:
                 rows=deduped,
             )
             summary = summary_for_site(conn, site_url=base_site_url)
+        stage_durations["db"] = perf_counter() - stage_start
+        stage_durations["total"] = perf_counter() - overall_start
 
         progress("done", 100, "Scan completed")
         return {
             "scan_id": scan_id,
             "site_url": base_site_url,
             "summary": summary,
+            "stage_durations": stage_durations,
             "run_dir": str(run_dir),
             "counts": {
                 "instances": len(deduped),

@@ -62,6 +62,7 @@ class ScanStatusResponse(BaseModel):
     error: str | None = None
     site_url: str | None = None
     scan_id: str | None = None
+    stage_durations: dict[str, float] = Field(default_factory=dict)
 
 
 class AssetPreviewRow(BaseModel):

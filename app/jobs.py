@@ -22,6 +22,7 @@ class JobState:
     site_url: str | None = None
     scan_id: str | None = None
     summary: dict | None = None
+    stage_durations: dict[str, float] = field(default_factory=dict)
 
 
 class JobManager:
@@ -71,6 +72,7 @@ class JobManager:
             state.finished_at = datetime.now(timezone.utc)
             state.site_url = result.get("site_url")
             state.summary = result.get("summary")
+            state.stage_durations = result.get("stage_durations", {})
 
     def _update(self, job_id: str, phase: str, pct: int, msg: str) -> None:
         with self._lock:
@@ -87,4 +89,3 @@ class JobManager:
             state.error = error
             state.message = "Scan failed"
             state.finished_at = datetime.now(timezone.utc)
-

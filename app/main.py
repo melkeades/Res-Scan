@@ -85,6 +85,7 @@ def get_scan(job_id: str):
         error=job.error,
         site_url=job.site_url,
         scan_id=job.scan_id,
+        stage_durations=job.stage_durations,
     )
 
 

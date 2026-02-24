@@ -1,0 +1,2 @@
+"""Res-Scan application package."""
+

@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Res-Scan</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="panel">
+      <div class="top-tabs">
+        <button class="tab-btn active" id="tab-btn-scan" type="button">Scan</button>
+        <button class="tab-btn" id="tab-btn-view" type="button">View</button>
+      </div>
+
+      <section id="tab-scan" class="tab-panel active">
+        <h1>Res-Scan</h1>
+        <p>Scan a website and record exact asset instances by DOM position.</p>
+
+        <form id="scan-form">
+          <div>
+            <label for="base_url">Website URL</label>
+            <input id="base_url" name="base_url" type="text" required placeholder="https://example.com">
+          </div>
+
+          <div>
+            <label>Resource types (optional)</label>
+            <div class="checkset" id="resource-types">
+              {% for kind in resource_types %}
+              <label><input type="checkbox" value="{{ kind }}"> {{ kind }}</label>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="row-3">
+            <div>
+              <label for="depth">Depth</label>
+              <input id="depth" name="depth" type="number" min="1" max="12" value="4">
+            </div>
+            <div>
+              <label for="max_pages">Max pages</label>
+              <input id="max_pages" name="max_pages" type="number" min="1" value="5000">
+            </div>
+            <div>
+              <label for="timeout_seconds">Timeout (seconds)</label>
+              <input id="timeout_seconds" name="timeout_seconds" type="number" min="1" value="20">
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label for="include_regex">Include regex</label>
+              <input id="include_regex" name="include_regex" type="text" placeholder=".*\\.(js|css)$">
+            </div>
+            <div>
+              <label for="exclude_regex">Exclude regex</label>
+              <input id="exclude_regex" name="exclude_regex" type="text" placeholder=".*(analytics|tracker).*">
+            </div>
+          </div>
+
+          <div class="checkset">
+            <label><input id="follow_redirects" type="checkbox" checked> follow redirects</label>
+            <label><input id="respect_robots" type="checkbox" checked> respect robots.txt</label>
+          </div>
+
+          <div>
+            <button type="submit">Run scan</button>
+          </div>
+        </form>
+
+        <div class="status" id="status-box">Idle.</div>
+        <pre id="summary-box"></pre>
+        <div id="preview"></div>
+      </section>
+
+      <section id="tab-view" class="tab-panel">
+        <h1>Scanned Sites</h1>
+        <p>Choose a site to inspect all discovered resource rows.</p>
+
+        <div id="view-message" class="status">Loading sites...</div>
+        <div class="table-wrap">
+          <table id="sites-table">
+            <thead>
+              <tr>
+                <th>Site Name</th>
+                <th>Resources/Rows</th>
+                <th>Time of Scan</th>
+              </tr>
+            </thead>
+            <tbody id="sites-table-body"></tbody>
+          </table>
+        </div>
+
+        <div id="assets-view" class="assets-view hidden">
+          <h2 id="selected-site-title"></h2>
+          <div id="column-toggle" class="column-toggle"></div>
+          <div id="filters-hint" class="filters-hint">
+            Filters: all columns use mask matching. `content_length` and `discovered_at` show rows with values greater than input.
+          </div>
+          <div class="table-wrap full-width">
+            <table id="assets-table"></table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById("scan-form");
+    const statusBox = document.getElementById("status-box");
+    const summaryBox = document.getElementById("summary-box");
+    const previewBox = document.getElementById("preview");
+    const containerEl = document.querySelector(".container");
+
+    const tabBtnScan = document.getElementById("tab-btn-scan");
+    const tabBtnView = document.getElementById("tab-btn-view");
+    const tabScan = document.getElementById("tab-scan");
+    const tabView = document.getElementById("tab-view");
+
+    const viewMessage = document.getElementById("view-message");
+    const sitesTableBody = document.getElementById("sites-table-body");
+    const assetsView = document.getElementById("assets-view");
+    const selectedSiteTitle = document.getElementById("selected-site-title");
+    const columnToggle = document.getElementById("column-toggle");
+    const assetsTable = document.getElementById("assets-table");
+
+    const ASSET_COLUMNS = [
+      "page_url",
+      "asset_url",
+      "dom_path",
+      "asset_attr",
+      "attr_occurrence",
+      "instance_key",
+      "resource_type",
+      "status_code",
+      "content_type",
+      "content_length",
+      "scan_id",
+      "discovered_at",
+    ];
+    const EXCEED_COLUMNS = new Set(["content_length", "discovered_at"]);
+
+    const viewState = {
+      sites: [],
+      selectedSiteUrl: null,
+      rows: [],
+      filters: {},
+      visibleColumns: {},
+      sortColumn: null,
+      sortDirection: "desc",
+    };
+    ASSET_COLUMNS.forEach((column) => {
+      viewState.filters[column] = "";
+      viewState.visibleColumns[column] = !["instance_key", "scan_id"].includes(column);
+    });
+
+    function activateTab(tabName) {
+      const scanActive = tabName === "scan";
+      tabBtnScan.classList.toggle("active", scanActive);
+      tabBtnView.classList.toggle("active", !scanActive);
+      tabScan.classList.toggle("active", scanActive);
+      tabView.classList.toggle("active", !scanActive);
+      if (scanActive) {
+        containerEl.classList.remove("wide");
+      } else {
+        containerEl.classList.toggle("wide", Boolean(viewState.selectedSiteUrl));
+      }
+      if (!scanActive) {
+        loadSites();
+      }
+    }
+
+    tabBtnScan.addEventListener("click", () => activateTab("scan"));
+    tabBtnView.addEventListener("click", () => activateTab("view"));
+
+    function parseIntField(id) {
+      return Number.parseInt(document.getElementById(id).value, 10);
+    }
+
+    function selectedResourceTypes() {
+      const checks = document.querySelectorAll("#resource-types input[type=checkbox]");
+      const values = [];
+      checks.forEach((el) => {
+        if (el.checked) values.push(el.value);
+      });
+      return values.length ? values : null;
+    }
+
+    async function poll(jobId, baseUrl) {
+      const statusRes = await fetch(`/api/scans/${jobId}`);
+      const status = await statusRes.json();
+      statusBox.textContent = `${status.status} | ${status.phase} | ${status.progress_pct}% | ${status.message}`;
+      if (status.status === "failed") {
+        summaryBox.textContent = status.error || "Scan failed";
+        return;
+      }
+      if (status.status !== "done") {
+        setTimeout(() => poll(jobId, baseUrl), 1000);
+        return;
+      }
+      const summaryRes = await fetch(`/api/scans/${jobId}/summary`);
+      const summary = await summaryRes.json();
+      summaryBox.textContent = JSON.stringify(summary, null, 2);
+
+      const siteKey = status.site_url || baseUrl;
+      const previewRes = await fetch(`/api/assets/preview?site_url=${encodeURIComponent(siteKey)}&limit=100&offset=0`);
+      const preview = await previewRes.json();
+      renderScanPreview(preview.rows || []);
+      loadSites();
+    }
+
+    function renderScanPreview(rows) {
+      if (!rows.length) {
+        previewBox.innerHTML = "<p>No rows.</p>";
+        return;
+      }
+      const headers = [
+        "page_url", "asset_url", "dom_path", "asset_attr", "attr_occurrence", "instance_key",
+        "resource_type", "status_code", "content_type", "content_length"
+      ];
+      const headHtml = headers.map((h) => `<th>${h}</th>`).join("");
+      const bodyHtml = rows.map((row) => {
+        const cells = headers.map((h) => {
+          const value = h === "content_length" ? formatContentLength(row[h]) : row[h];
+          return `<td>${escapeHtml(value)}</td>`;
+        }).join("");
+        return `<tr>${cells}</tr>`;
+      }).join("");
+      previewBox.innerHTML = `<div class="table-wrap"><table><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
+    }
+
+    function escapeHtml(value) {
+      if (value === null || value === undefined) return "";
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function formatDateTime(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString();
+    }
+
+    function formatContentLength(value) {
+      const bytes = Number(value);
+      if (Number.isNaN(bytes) || bytes < 0) return value ?? "";
+      const kb = 1024;
+      const mb = 1024 * 1024;
+      if (bytes > kb && bytes < mb) {
+        const text = (bytes / kb).toFixed(1).replace(/\.0$/, "");
+        return `${text} KB`;
+      }
+      if (bytes > mb && bytes < 10 * mb) {
+        return `${(bytes / mb).toFixed(1)} MB`;
+      }
+      if (bytes >= 10 * mb) {
+        return `${(bytes / mb).toFixed(0)} MB`;
+      }
+      return `${bytes} B`;
+    }
+
+    async function loadSites() {
+      viewMessage.textContent = "Loading sites...";
+      const res = await fetch("/api/sites");
+      if (!res.ok) {
+        viewMessage.textContent = `Failed to load sites (${res.status})`;
+        return;
+      }
+      const data = await res.json();
+      viewState.sites = data.rows || [];
+      renderSitesTable();
+      if (!viewState.sites.length) {
+        viewMessage.textContent = "No scanned sites yet.";
+      } else {
+        viewMessage.textContent = "Select a site row to view resources.";
+      }
+    }
+
+    function renderSitesTable() {
+      if (!viewState.sites.length) {
+        sitesTableBody.innerHTML = "";
+        return;
+      }
+      const html = viewState.sites.map((row) => {
+        const activeClass = row.site_url === viewState.selectedSiteUrl ? "active-row" : "";
+        return `
+          <tr class="clickable ${activeClass}" data-site-url="${escapeHtml(row.site_url)}">
+            <td>${escapeHtml(row.site_name)}</td>
+            <td>${escapeHtml(row.resource_rows)}</td>
+            <td>${escapeHtml(formatDateTime(row.scanned_at))}</td>
+          </tr>
+        `;
+      }).join("");
+      sitesTableBody.innerHTML = html;
+      document.querySelectorAll("#sites-table-body tr.clickable").forEach((rowEl) => {
+        rowEl.addEventListener("click", () => {
+          const siteUrl = rowEl.getAttribute("data-site-url");
+          if (siteUrl) loadSiteAssets(siteUrl);
+        });
+      });
+    }
+
+    async function loadSiteAssets(siteUrl) {
+      viewState.selectedSiteUrl = siteUrl;
+      renderSitesTable();
+      viewMessage.textContent = `Loading resources for ${siteUrl}...`;
+      const res = await fetch(`/api/assets/site?site_url=${encodeURIComponent(siteUrl)}`);
+      if (!res.ok) {
+        viewMessage.textContent = `Failed to load resources (${res.status})`;
+        return;
+      }
+      const data = await res.json();
+      viewState.rows = data.rows || [];
+      viewState.sortColumn = null;
+      viewState.sortDirection = "desc";
+      ASSET_COLUMNS.forEach((column) => {
+        viewState.filters[column] = "";
+      });
+      assetsView.classList.remove("hidden");
+      containerEl.classList.add("wide");
+      selectedSiteTitle.textContent = `${siteUrl} (${data.total} rows)`;
+      renderColumnToggles();
+      renderAssetsTable();
+      viewMessage.textContent = "Ready.";
+    }
+
+    function renderColumnToggles() {
+      columnToggle.innerHTML = ASSET_COLUMNS.map((column) => {
+        const checked = viewState.visibleColumns[column] ? "checked" : "";
+        return `
+          <label class="toggle-item">
+            <input type="checkbox" data-column="${column}" ${checked}>
+            <span>${column}</span>
+          </label>
+        `;
+      }).join("");
+      columnToggle.querySelectorAll("input[type=checkbox]").forEach((box) => {
+        box.addEventListener("change", () => {
+          const column = box.getAttribute("data-column");
+          viewState.visibleColumns[column] = box.checked;
+          renderAssetsTable();
+        });
+      });
+    }
+
+    function maskMatches(value, mask) {
+      const text = String(value ?? "").toLowerCase();
+      const input = mask.toLowerCase().trim();
+      if (!input) return true;
+      if (input.includes("*") || input.includes("?")) {
+        const regexText = "^" + input
+          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+          .replace(/\*/g, ".*")
+          .replace(/\?/g, ".") + "$";
+        return new RegExp(regexText, "i").test(text);
+      }
+      return text.includes(input);
+    }
+
+    function exceedsFilter(column, value, rawInput) {
+      if (!rawInput.trim()) return true;
+      if (column === "content_length") {
+        const threshold = Number(rawInput);
+        if (Number.isNaN(threshold)) return true;
+        const current = Number(value ?? 0);
+        return current > threshold;
+      }
+      if (column === "discovered_at") {
+        const thresholdDate = new Date(rawInput);
+        if (Number.isNaN(thresholdDate.getTime())) return true;
+        const currentDate = new Date(value);
+        if (Number.isNaN(currentDate.getTime())) return false;
+        return currentDate.getTime() > thresholdDate.getTime();
+      }
+      return true;
+    }
+
+    function applyFilters(rows) {
+      return rows.filter((row) => {
+        for (const column of ASSET_COLUMNS) {
+          const input = viewState.filters[column] || "";
+          if (!input.trim()) continue;
+          if (EXCEED_COLUMNS.has(column)) {
+            if (!exceedsFilter(column, row[column], input)) return false;
+          } else if (!maskMatches(row[column], input)) {
+            return false;
+          }
+        }
+        return true;
+      });
+    }
+
+    function applySort(rows) {
+      if (!viewState.sortColumn) return rows;
+      const column = viewState.sortColumn;
+      const direction = viewState.sortDirection === "desc" ? -1 : 1;
+      return [...rows].sort((a, b) => {
+        const av = a[column];
+        const bv = b[column];
+        if (column === "content_length" || column === "attr_occurrence" || column === "status_code") {
+          const an = Number(av ?? 0);
+          const bn = Number(bv ?? 0);
+          return (an - bn) * direction;
+        }
+        if (column === "discovered_at") {
+          const at = new Date(av).getTime() || 0;
+          const bt = new Date(bv).getTime() || 0;
+          return (at - bt) * direction;
+        }
+        return String(av ?? "").localeCompare(String(bv ?? "")) * direction;
+      });
+    }
+
+    function sortArrow(column) {
+      if (viewState.sortColumn !== column) return "";
+      return viewState.sortDirection === "desc" ? " \u2193" : " \u2191";
+    }
+
+    function renderAssetsTable() {
+      const visibleColumns = ASSET_COLUMNS.filter((column) => viewState.visibleColumns[column]);
+      if (!visibleColumns.length) {
+        assetsTable.innerHTML = "<tbody><tr><td>Select at least one column.</td></tr></tbody>";
+        return;
+      }
+
+      const filtered = applyFilters(viewState.rows);
+      const finalRows = applySort(filtered);
+
+      const headerHtml = visibleColumns.map((column) => {
+        return `<th class="sortable" data-sort-column="${column}">${escapeHtml(column)}${sortArrow(column)}</th>`;
+      }).join("");
+
+      const filterRowHtml = visibleColumns.map((column) => {
+        return `<th><input class="filter-input" data-filter-column="${column}" type="text" value="${escapeHtml(viewState.filters[column] || "")}" placeholder="${EXCEED_COLUMNS.has(column) ? "> (press Enter)" : "mask (press Enter)"}"></th>`;
+      }).join("");
+
+      const bodyHtml = finalRows.map((row) => {
+        const cells = visibleColumns.map((column) => {
+          let value = row[column];
+          if (column === "discovered_at") {
+            value = formatDateTime(row[column]);
+          } else if (column === "content_length") {
+            value = formatContentLength(row[column]);
+          }
+          return `<td>${escapeHtml(value)}</td>`;
+        }).join("");
+        return `<tr>${cells}</tr>`;
+      }).join("");
+
+      assetsTable.innerHTML = `
+        <thead>
+          <tr>${headerHtml}</tr>
+          <tr>${filterRowHtml}</tr>
+        </thead>
+        <tbody>${bodyHtml}</tbody>
+      `;
+
+      assetsTable.querySelectorAll("th.sortable").forEach((th) => {
+        th.addEventListener("click", () => {
+          const column = th.getAttribute("data-sort-column");
+          if (!column) return;
+          if (viewState.sortColumn === column) {
+            viewState.sortDirection = viewState.sortDirection === "desc" ? "asc" : "desc";
+          } else {
+            viewState.sortColumn = column;
+            viewState.sortDirection = "desc";
+          }
+          renderAssetsTable();
+        });
+      });
+
+      assetsTable.querySelectorAll("input.filter-input").forEach((input) => {
+        input.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          const column = input.getAttribute("data-filter-column");
+          if (!column) return;
+          viewState.filters[column] = input.value;
+          renderAssetsTable();
+        });
+      });
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      previewBox.innerHTML = "";
+      summaryBox.textContent = "";
+      const payload = {
+        base_url: document.getElementById("base_url").value.trim(),
+        resource_types: selectedResourceTypes(),
+        depth: parseIntField("depth"),
+        max_pages: parseIntField("max_pages"),
+        timeout_seconds: parseIntField("timeout_seconds"),
+        include_regex: document.getElementById("include_regex").value.trim() || null,
+        exclude_regex: document.getElementById("exclude_regex").value.trim() || null,
+        follow_redirects: document.getElementById("follow_redirects").checked,
+        respect_robots: document.getElementById("respect_robots").checked
+      };
+      statusBox.textContent = "Starting scan...";
+      const res = await fetch("/api/scans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        statusBox.textContent = `Request failed (${res.status})`;
+        summaryBox.textContent = await res.text();
+        return;
+      }
+      const data = await res.json();
+      poll(data.job_id, payload.base_url);
+    });
+
+    activateTab("scan");
+  </script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+[project]
+name = "res-scan"
+version = "0.1.0"
+description = "Local website asset inventory scanner with exact-position instance tracking"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "duckdb>=1.4.4",
+    "fastapi>=0.132.0",
+    "jinja2>=3.1.6",
+    "lxml>=6.0.2",
+    "pydantic>=2.12.5",
+    "python-multipart>=0.0.22",
+    "uvicorn>=0.41.0",
+]
+
+[project.scripts]
+res-scan = "app.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

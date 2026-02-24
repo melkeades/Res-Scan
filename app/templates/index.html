@@ -86,6 +86,7 @@
                 <th>Site Name</th>
                 <th>Resources/Rows</th>
                 <th>Time of Scan</th>
+                <th class="delete-col">Delete</th>
               </tr>
             </thead>
             <tbody id="sites-table-body"></tbody>
@@ -274,8 +275,15 @@
       }
       const data = await res.json();
       viewState.sites = data.rows || [];
+      if (
+        viewState.selectedSiteUrl &&
+        !viewState.sites.some((row) => row.site_url === viewState.selectedSiteUrl)
+      ) {
+        clearSelectedSiteView();
+      }
       renderSitesTable();
       if (!viewState.sites.length) {
+        clearSelectedSiteView();
         viewMessage.textContent = "No scanned sites yet.";
       } else {
         viewMessage.textContent = "Select a site row to view resources.";
@@ -294,6 +302,9 @@
             <td>${escapeHtml(row.site_name)}</td>
             <td>${escapeHtml(row.resource_rows)}</td>
             <td>${escapeHtml(formatDateTime(row.scanned_at))}</td>
+            <td class="delete-col">
+              <button class="site-delete-btn" data-delete-site-url="${escapeHtml(row.site_url)}" type="button" title="Delete site">X</button>
+            </td>
           </tr>
         `;
       }).join("");
@@ -302,6 +313,14 @@
         rowEl.addEventListener("click", () => {
           const siteUrl = rowEl.getAttribute("data-site-url");
           if (siteUrl) loadSiteAssets(siteUrl);
+        });
+      });
+      document.querySelectorAll(".site-delete-btn").forEach((btn) => {
+        btn.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          const siteUrl = btn.getAttribute("data-delete-site-url");
+          if (!siteUrl) return;
+          await deleteSite(siteUrl);
         });
       });
     }
@@ -328,6 +347,29 @@
       renderColumnToggles();
       renderAssetsTable();
       viewMessage.textContent = "Ready.";
+    }
+
+    function clearSelectedSiteView() {
+      viewState.selectedSiteUrl = null;
+      viewState.rows = [];
+      assetsView.classList.add("hidden");
+      selectedSiteTitle.textContent = "";
+      containerEl.classList.remove("wide");
+    }
+
+    async function deleteSite(siteUrl) {
+      const res = await fetch(`/api/sites?site_url=${encodeURIComponent(siteUrl)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        viewMessage.textContent = `Failed to delete site (${res.status})`;
+        return;
+      }
+      if (viewState.selectedSiteUrl === siteUrl) {
+        clearSelectedSiteView();
+      }
+      await loadSites();
+      viewMessage.textContent = `Deleted: ${siteUrl}`;
     }
 
     function renderColumnToggles() {

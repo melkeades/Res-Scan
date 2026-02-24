@@ -159,6 +159,26 @@ td {
   word-break: break-word;
 }
 
+th.delete-col,
+td.delete-col {
+  width: 64px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.site-delete-btn {
+  padding: 0.2rem 0.45rem;
+  border-radius: 7px;
+  background: #d53b3b;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.site-delete-btn:hover {
+  background: #b02828;
+}
+
 tbody tr.clickable:hover {
   background: #eff5ff;
 }

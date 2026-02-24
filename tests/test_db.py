@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.db import assets_for_site, connect, list_scanned_sites, preview_assets, replace_site_assets
+from app.db import (
+    assets_for_site,
+    connect,
+    delete_site_data,
+    list_scanned_sites,
+    preview_assets,
+    replace_site_assets,
+)
 
 
 def _row(instance_key: str, page_url: str, asset_url: str, occurrence: int) -> dict:
@@ -93,3 +100,23 @@ def test_site_list_and_site_assets_views(tmp_path) -> None:
         assert {"page_url", "asset_url", "dom_path", "discovered_at"} <= set(
             site_rows[0].keys()
         )
+
+
+def test_delete_site_data_removes_assets_and_meta(tmp_path) -> None:
+    db_path = tmp_path / "assets.duckdb"
+    with connect(db_path) as conn:
+        replace_site_assets(
+            conn,
+            site_url="https://delete.me",
+            scan_id="scan-delete",
+            rows=[{**_row("k-del", "https://delete.me/a", "https://delete.me/f.js", 1), "site_url": "https://delete.me"}],
+        )
+
+        result = delete_site_data(conn, site_url="https://delete.me")
+        assert result["site_url"] == "https://delete.me"
+        assert result["removed_assets"] == 1
+        assert result["removed_meta"] is True
+
+        rows, total = assets_for_site(conn, site_url="https://delete.me")
+        assert total == 0
+        assert rows == []

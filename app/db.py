@@ -270,3 +270,26 @@ def assets_for_site(conn: duckdb.DuckDBPyConnection, *, site_url: str) -> tuple[
         "discovered_at",
     ]
     return [dict(zip(columns, row, strict=False)) for row in rows], int(total)
+
+
+def delete_site_data(conn: duckdb.DuckDBPyConnection, *, site_url: str) -> dict:
+    conn.execute("BEGIN TRANSACTION")
+    try:
+        removed_assets = conn.execute(
+            "SELECT COUNT(*) FROM assets WHERE site_url = ?", [site_url]
+        ).fetchone()[0]
+        removed_meta_rows = conn.execute(
+            "SELECT COUNT(*) FROM scan_meta WHERE site_url = ?", [site_url]
+        ).fetchone()[0]
+        conn.execute("DELETE FROM assets WHERE site_url = ?", [site_url])
+        conn.execute("DELETE FROM scan_meta WHERE site_url = ?", [site_url])
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    else:
+        conn.execute("COMMIT")
+    return {
+        "site_url": site_url,
+        "removed_assets": int(removed_assets),
+        "removed_meta": bool(removed_meta_rows),
+    }

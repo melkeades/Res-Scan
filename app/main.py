@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import AppSettings, RESOURCE_TYPES
-from app.db import assets_for_site, connect, list_scanned_sites, preview_assets
+from app.db import assets_for_site, connect, delete_site_data, list_scanned_sites, preview_assets
 from app.jobs import JobManager
 from app.models import (
     PreviewResponse,
@@ -16,6 +16,7 @@ from app.models import (
     ScanStartResponse,
     ScanStatusResponse,
     SiteAssetsResponse,
+    SiteDeleteResponse,
     SiteListResponse,
     SessionListResponse,
     SummaryResponse,
@@ -113,6 +114,15 @@ def get_sites():
     with connect(settings.db_path) as conn:
         rows = list_scanned_sites(conn)
     return SiteListResponse(rows=rows)
+
+
+@app.delete("/api/sites", response_model=SiteDeleteResponse)
+def delete_site(site_url: str = Query(..., min_length=1)):
+    with connect(settings.db_path) as conn:
+        result = delete_site_data(conn, site_url=site_url)
+    if result["removed_assets"] == 0 and not result["removed_meta"]:
+        raise HTTPException(status_code=404, detail="Unknown site_url")
+    return SiteDeleteResponse(**result)
 
 
 @app.get("/api/assets/site", response_model=SiteAssetsResponse)

@@ -135,3 +135,9 @@ class SiteAssetsResponse(BaseModel):
     site_url: str
     total: int
     rows: list[SiteAssetRow]
+
+
+class SiteDeleteResponse(BaseModel):
+    site_url: str
+    removed_assets: int
+    removed_meta: bool

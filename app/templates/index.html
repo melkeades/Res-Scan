@@ -95,7 +95,10 @@
         </div>
 
         <div id="assets-view" class="assets-view hidden">
-          <h2 id="selected-site-title"></h2>
+          <div class="assets-header">
+            <h2 id="selected-site-title"></h2>
+            <button id="export-csv-btn" class="secondary-btn" type="button" disabled>Export to CSV</button>
+          </div>
           <div id="assets-count" class="assets-count"></div>
           <div id="column-toggle" class="column-toggle"></div>
           <div id="filters-hint" class="filters-hint">
@@ -144,6 +147,7 @@
     const deleteModalText = document.getElementById("delete-modal-text");
     const deleteConfirmBtn = document.getElementById("delete-confirm-btn");
     const deleteCancelBtn = document.getElementById("delete-cancel-btn");
+    const exportCsvBtn = document.getElementById("export-csv-btn");
 
     const ASSET_COLUMNS = [
       "page_url",
@@ -370,6 +374,7 @@
       const res = await fetch(`/api/assets/site?site_url=${encodeURIComponent(siteUrl)}`);
       if (!res.ok) {
         viewMessage.textContent = `Failed to load resources (${res.status})`;
+        exportCsvBtn.disabled = true;
         return;
       }
       const data = await res.json();
@@ -382,6 +387,7 @@
       assetsView.classList.remove("hidden");
       containerEl.classList.add("wide");
       selectedSiteTitle.textContent = `${siteUrl} (${data.total} rows)`;
+      exportCsvBtn.disabled = false;
       renderColumnToggles();
       renderAssetsTable();
       viewMessage.textContent = "Ready.";
@@ -393,7 +399,52 @@
       assetsView.classList.add("hidden");
       selectedSiteTitle.textContent = "";
       assetsCount.textContent = "";
+      exportCsvBtn.disabled = true;
       containerEl.classList.remove("wide");
+    }
+
+    function csvEscape(value) {
+      if (value === null || value === undefined) return "";
+      const text = String(value).replace(/"/g, "\"\"");
+      return /[",\r\n]/.test(text) ? `"${text}"` : text;
+    }
+
+    function sanitizeFilenamePart(value) {
+      return String(value)
+        .toLowerCase()
+        .replace(/^https?:\/\//, "")
+        .replace(/[^a-z0-9.-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "") || "site";
+    }
+
+    function exportSelectedSiteToCsv() {
+      if (!viewState.selectedSiteUrl) return;
+      const visibleColumns = ASSET_COLUMNS.filter((column) => viewState.visibleColumns[column]);
+      if (!visibleColumns.length) {
+        viewMessage.textContent = "Export failed: select at least one visible column.";
+        return;
+      }
+      const rows = applySort(applyFilters(viewState.rows));
+      const header = visibleColumns.join(",");
+      const body = rows.map((row) => {
+        return visibleColumns.map((column) => csvEscape(row[column])).join(",");
+      }).join("\r\n");
+      const csv = [header, body].filter(Boolean).join("\r\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const sitePart = sanitizeFilenamePart(viewState.selectedSiteUrl);
+      const filename = `${sitePart}-assets-${stamp}.csv`;
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      viewMessage.textContent = `CSV exported (${rows.length} rows): ${filename}`;
     }
 
     function openDeleteModal(siteUrl) {
@@ -439,6 +490,8 @@
         closeDeleteModal();
       }
     });
+
+    exportCsvBtn.addEventListener("click", exportSelectedSiteToCsv);
 
     function renderColumnToggles() {
       columnToggle.innerHTML = ASSET_COLUMNS.map((column) => {

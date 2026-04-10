@@ -102,6 +102,24 @@ def test_site_list_and_site_assets_views(tmp_path) -> None:
         )
 
 
+def test_site_list_includes_zero_asset_scans(tmp_path) -> None:
+    db_path = tmp_path / "assets.sqlite"
+    with connect(db_path) as conn:
+        replace_site_assets(
+            conn,
+            site_url="https://empty.example",
+            scan_id="scan-empty",
+            rows=[],
+        )
+
+        sites = list_scanned_sites(conn)
+        assert len(sites) == 1
+        assert sites[0]["site_url"] == "https://empty.example"
+        assert sites[0]["site_name"] == "empty.example"
+        assert sites[0]["resource_rows"] == 0
+        assert sites[0]["scanned_at"] is not None
+
+
 def test_delete_site_data_removes_assets_and_meta(tmp_path) -> None:
     db_path = tmp_path / "assets.sqlite"
     with connect(db_path) as conn:

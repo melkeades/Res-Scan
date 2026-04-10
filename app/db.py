@@ -200,12 +200,31 @@ def summary_for_site(conn: sqlite3.Connection, *, site_url: str) -> dict:
 def list_scanned_sites(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         """
+        WITH all_sites AS (
+            SELECT site_url FROM scan_meta
+            UNION
+            SELECT site_url FROM assets
+        )
         SELECT
-            site_url,
-            COUNT(*) AS resource_rows,
-            MAX(discovered_at) AS scanned_at
-        FROM assets
-        GROUP BY site_url
+            s.site_url AS site_url,
+            (
+                SELECT COUNT(*)
+                FROM assets a
+                WHERE a.site_url = s.site_url
+            ) AS resource_rows,
+            COALESCE(
+                (
+                    SELECT MAX(a.discovered_at)
+                    FROM assets a
+                    WHERE a.site_url = s.site_url
+                ),
+                (
+                    SELECT m.last_scanned_at
+                    FROM scan_meta m
+                    WHERE m.site_url = s.site_url
+                )
+            ) AS scanned_at
+        FROM all_sites s
         ORDER BY scanned_at DESC, site_url ASC
         """
     ).fetchall()
@@ -272,4 +291,3 @@ def delete_site_data(conn: sqlite3.Connection, *, site_url: str) -> dict:
         "removed_assets": int(removed_assets),
         "removed_meta": bool(removed_meta_rows),
     }
-

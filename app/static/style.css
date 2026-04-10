@@ -200,6 +200,30 @@ tbody tr.active-row {
   margin-top: 1rem;
 }
 
+.assets-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.assets-header h2 {
+  margin-bottom: 0;
+}
+
+.secondary-btn {
+  background: #5f728d;
+}
+
+.secondary-btn:hover {
+  background: #4f627d;
+}
+
+.secondary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .assets-count {
   font-size: 0.84rem;
   color: #294968;
@@ -311,5 +335,10 @@ tbody tr.active-row {
   .row,
   .row-3 {
     grid-template-columns: 1fr;
+  }
+
+  .assets-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
